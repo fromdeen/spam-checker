@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Open Source Red Flag Checker</title>
+  <style>
+    :root{--bg1:#071029;--bg2:#0f172a;--glass:rgba(255,255,255,0.04);--accent1:#7c3aed;--accent2:#06b6d4;--ok:#10b981;--warn:#f59e0b;--danger:#ef4444}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:linear-gradient(180deg,var(--bg1),var(--bg2));font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial;color:#e6eef8;display:flex;align-items:center;justify-content:center;padding:32px}
+    .app{width:100%;max-width:980px;background:linear-gradient(135deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:16px;padding:20px;border:1px solid rgba(255,255,255,0.04);box-shadow:0 10px 40px rgba(2,6,23,0.6)}
+    header{display:flex;align-items:center;gap:16px}
+    .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent1),var(--accent2));display:grid;place-items:center;font-size:26px}
+    h1{margin:0;font-size:1.25rem}
+    p.lead{margin:0;color:#9fb0d8}
+    .grid{display:grid;grid-template-columns:1fr 360px;gap:18px;margin-top:18px}
+    .card{background:var(--glass);padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,0.02)}
+    label{display:block;color:#9fb0d8;font-size:0.85rem;margin-bottom:6px}
+    select,input{width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    button.primary{background:linear-gradient(90deg,var(--accent1),var(--accent2));color:#041025;padding:10px;border-radius:10px;border:none;cursor:pointer}
+    .result{margin-top:12px;padding:12px;border-radius:10px}
+    .safe{background:linear-gradient(90deg,rgba(16,185,129,0.12),rgba(6,182,129,0.06));color:var(--ok);border-left:4px solid rgba(16,185,129,0.9)}
+    .warn{background:linear-gradient(90deg,rgba(245,158,11,0.08),rgba(245,158,11,0.04));color:var(--warn);border-left:4px solid rgba(245,158,11,0.9)}
+    .danger{background:linear-gradient(90deg,rgba(239,68,68,0.08),rgba(239,68,68,0.03));color:var(--danger);border-left:4px solid rgba(239,68,68,0.9)}
+    .sources{margin-top:8px;font-size:0.85rem;color:#9fb0d8}
+    .small{font-size:0.85rem;color:#9fb0d8}
+    .evidence a{color:#a5e8ff}
+    .footer{margin-top:14px;text-align:right;color:#9fb0d8;font-size:0.85rem}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">🔎</div>
+      <div>
+        <h1>Open Source Red Flag Checker</h1>
+        <p class="lead">Check phone numbers, Twitter handles, or bank accounts against open-source reports with proof links.</p>
+      </div>
+    </header>
+
+    <div class="grid">
+      <main class="card">
+        <label for="entityType">Type</label>
+        <select id="entityType">
+          <option value="number">Phone Number</option>
+          <option value="twitter">Twitter Handle</option>
+          <option value="bank">Bank Account</option>
+        </select>
+
+        <label for="entityInput">Enter value (e.g. +6281234567890 / @spam_account / 1234567890)</label>
+        <input id="entityInput" placeholder="Enter data" />
+
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="primary" id="checkBtn">Check</button>
+          <button id="reportBtn" class="small" style="background:transparent;border:1px solid rgba(255,255,255,0.04);color:#9fb0d8;border-radius:10px;padding:10px;cursor:pointer">Report</button>
+        </div>
+
+        <div id="status" class="small" style="margin-top:10px;color:#9fb0d8">Loading sample data ...</div>
+        <div id="resultWrap"></div>
+        <div class="footer">Preview — do not submit sensitive data in this demo</div>
+      </main>
+
+      <aside class="card">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div class="small">Loaded data sources (simulation):</div>
+          <ul id="sourcesList" class="small"></ul>
+          <div style="margin-top:8px" class="small">Files loaded from repo:</div>
+          <pre id="filesSample">/data/reports-phone.json
+/data/reports-twitter.json
+/data/reports-bank.json</pre>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      const RAW_BASE = 'https://raw.githubusercontent.com/fromdeen/spam_checker/main/data';
+      const FILES = [
+        RAW_BASE + '/reports-phone.json',
+        RAW_BASE + '/reports-twitter.json',
+        RAW_BASE + '/reports-bank.json'
+      ];
+
+      const REPORT_ENDPOINT = 'https://your-worker.example.com/report';
+
+      const SAMPLE_PHONE = [
+        { id: 'p1', type:'number', value:'+6281234567890', tags:['spam','loan'], reports:4, last_reported:'2025-07-02', sources:[{name:'Community Repo', url:'https://github.com/example/repo/issues/12'}] }
+      ];
+      const SAMPLE_TWITTER = [
+        { id:'t1', type:'twitter', value:'@spam_account', tags:['phishing','scam'], reports:8, last_reported:'2025-07-30', sources:[{name:'Thread', url:'https://twitter.com/someuser/status/123'}] }
+      ];
+      const SAMPLE_BANK = [
+        { id:'b1', type:'bank', value:'1234567890', bank:'Bank ABC', tags:['scam','fraud'], reports:10, last_reported:'2025-08-10', sources:[{name:'Police Report', url:'https://example.police/report/987'}] }
+      ];
+
+      async function loadAll() {
+        const status = document.getElementById('status');
+        let combined = [];
+        try {
+          const promises = FILES.map(u => fetch(u).then(r => r.ok ? r.json() : Promise.reject(u)));
+          const results = await Promise.all(promises);
+          results.forEach(arr => combined.push(...arr));
+          status.textContent = 'Data loaded from GitHub.';
+        } catch (err) {
+          combined = [...SAMPLE_PHONE, ...SAMPLE_TWITTER, ...SAMPLE_BANK];
+          status.textContent = 'Using embedded sample data.';
+        }
+        return combined;
+      }
+
+      function scoreFromReports(n){
+        if (n >= 8) return 'danger';
+        if (n >= 4) return 'warn';
+        return 'safe';
+      }
+
+      function escapeHtml(str){ return String(str||'').replace(/[&<>"]]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+      function renderResult(matches){
+        const wrap = document.getElementById('resultWrap');
+        wrap.innerHTML = '';
+        if (matches.length === 0) {
+          const div = document.createElement('div'); div.className='result safe'; div.textContent = '✅ No reports found.'; wrap.appendChild(div); return;
+        }
+        matches.forEach(m => {
+          const s = scoreFromReports(m.reports || 0);
+          const card = document.createElement('div');
+          card.className = 'result ' + s;
+          let html = `<div style="font-weight:700">${escapeHtml(m.value)} ${m.bank ? '('+escapeHtml(m.bank)+')':''}</div>`;
+          html += `<div class="small">Tags: ${(m.tags||[]).map(t=>`#${escapeHtml(t)}`).join(' ')} · Reports: ${m.reports||0} · Last: ${m.last_reported||'-'}</div>`;
+          html += `<div class="sources">Sources:</div><ul>`;
+          (m.sources||[]).forEach(src => {
+            html += `<li><a href="${escapeHtml(src.url)}" target="_blank">${escapeHtml(src.name)}</a></li>`;
+          });
+          html += '</ul>';
+          card.innerHTML = html;
+          wrap.appendChild(card);
+        });
+      }
+
+      let DB = [];
+      document.getElementById('checkBtn').addEventListener('click', async ()=>{
+        const type = document.getElementById('entityType').value;
+        const val = document.getElementById('entityInput').value.trim();
+        if (!val) return alert('Please enter a value');
+        const norm = type === 'twitter' ? (val.startsWith('@')?val.toLowerCase():('@'+val.toLowerCase())) : val;
+        const matches = DB.filter(e => e.type === type && e.value === norm);
+        renderResult(matches);
+      });
+
+      (async function(){
+        DB = await loadAll();
+        const sset = new Map();
+        DB.forEach(it=>{(it.sources||[]).forEach(src=>sset.set(src.url, src.name || src.url))});
+        const ul = document.getElementById('sourcesList'); ul.innerHTML='';
+        if (sset.size===0) ul.innerHTML='<li>(embedded sample)</li>';
+        for (const [url,name] of sset){
+          const li = document.createElement('li'); li.innerHTML = `<a href="${url}" target="_blank">${escapeHtml(name)}</a>`; ul.appendChild(li);
+        }
+      })();
+    </script>
+  </div>
+</body>
+</html>
